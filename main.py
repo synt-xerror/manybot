@@ -8,9 +8,10 @@ from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
 import time
 import pyperclip
+import random
 
-GRUPO = "notes"
-BOT_PREFIX = "🤖 *BOT:* "
+GRUPO = "𝑩𝒂𝒕𝒆 𝒑𝒂𝒑𝒐"
+BOT_PREFIX = "🤖 *ManyBot:* "
 PROFILE_DIR = "/home/syntax/whatsapp-profile"
 CHECK_INTERVAL = 0.5
 
@@ -58,17 +59,62 @@ def enviar_mensagem(driver, wait, texto):
     print("[ENVIO] Mensagem enviada.")
 
 def bot_msg(texto):
-    return f"{BOT_PREFIX}{texto}"
-
-def processar_comando(texto):
-    if texto == "!bot ping":
-        return bot_msg("pong 🏓")
-    return None
+    return f"{BOT_PREFIX}\n{texto}"
 
 # -----------------------------
 driver, wait = iniciar_driver()
 abrir_grupo(driver, wait)
 ultima_mensagem = None
+
+def jogo():
+    n = random.randint(1, 100)
+    print(f"[JOGO] Jogo iniciado! Número escolhido: {n}")
+    enviar_mensagem(driver, wait, bot_msg("Hora do jogo! Tentem adivinhar qual número de 1 a 100 eu estou pensando!"))
+
+    while True:
+        try:
+            tentativa = pegar_ultima_mensagem(driver)
+            if not tentativa or tentativa == ultima_mensagem:
+                time.sleep(CHECK_INTERVAL)
+                continue
+            
+            print(f"[JOGO] Nova tentativa: '{tentativa}'")
+            time.sleep(CHECK_INTERVAL)
+
+            if tentativa.isdigit():
+                num = int(tentativa)
+
+                if num == n:
+                    enviar_mensagem(driver, wait, bot_msg(f"Parabéns! Você acertou!! O número era: {n}"))
+                    break
+                elif num > n:
+                    enviar_mensagem(driver, wait, bot_msg(f"Quase! Um pouco menor. Sua resposta: {num}"))
+                elif num < n:
+                    enviar_mensagem(driver, wait, bot_msg(f"Quase! Um pouco maior. Sua resposta: {num}"))
+            
+        except Exception as e:
+            print(f"[ERRO] {type(e).__name__}: {e}")
+            time.sleep(1)
+
+def processar_comando(texto):
+    tokens = texto.split()
+
+    if tokens[0] == "!many":
+        if len(tokens) == 1:  # se só tiver "!many"
+            return bot_msg(
+                "E aí?! Aqui está a lista de todos os meus comandos:\n"
+                "- `!many ping` -> testa se estou funcionando\n"
+                "- `!many jogo` -> jogo de adivinhação\n"
+                "E ai, vai querer qual? 😄"
+            )
+        
+        elif tokens[1] == "ping":
+            return bot_msg("pong 🏓")
+
+        elif tokens[1] == "jogo":
+            jogo()
+
+    return None
 
 
 while True:
