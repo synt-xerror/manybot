@@ -1,4 +1,13 @@
-// main.js
+// get_id.js
+
+const arg = process.argv[2]; // argumento passado no node
+if (!arg) {
+    console.log("Use: node get_id.js grupos|contatos|<nome>");
+    process.exit(0);
+}
+
+console.log("[PESQUISANDO] Aguarde...");
+
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
@@ -15,22 +24,37 @@ client.on('qr', qr => {
     qrcode.generate(qr, { small: true });
 });
 
-client.on('ready', () => console.log("[BOT] WhatsApp conectado e sessão permanente"));
+client.on('ready', () => {
+    console.log("[BOT] WhatsApp conectado e sessão permanente");
+});
 
-client.on('message_create', async msg => {
-    try {
-        const chat = await msg.getChat(); // pega o chat uma única vez
+client.on('ready', async () => {
+    const chats = await client.getChats();
 
-        console.log("==================================");
-        console.log(`CHAT NAME : ${chat.name || chat.id.user || "Sem nome"}`);
-        console.log(`CHAT ID   : ${chat.id._serialized}`);
-        console.log(`FROM      : ${msg.from}`);
-        console.log(`BODY      : ${msg.body}`);
-        console.log("==================================\n");
+    let filtered = [];
 
-    } catch (err) {
-        console.error("[ERRO]", err);
+    if (arg.toLowerCase() === "grupos") {
+        filtered = chats.filter(c => c.isGroup);
+    } else if (arg.toLowerCase() === "contatos") {
+        filtered = chats.filter(c => !c.isGroup);
+    } else {
+        const search = arg.toLowerCase();
+        filtered = chats.filter(c => (c.name || c.id.user).toLowerCase().includes(search));
     }
+
+    if (filtered.length === 0) {
+        console.log("Nenhum chat encontrado com esse filtro.");
+    } else {
+        console.log(`Encontrados ${filtered.length} chats:`);
+        filtered.forEach(c => {
+            console.log("================================");
+            console.log("NAME:", c.name || c.id.user);
+            console.log("ID:", c.id._serialized);
+            console.log("GROUP:", c.isGroup);
+        });
+    }
+
+    process.exit(0); // fecha o script após listar
 });
 
 client.initialize();
