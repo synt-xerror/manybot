@@ -2,3 +2,4 @@ env.js
 .wwebjs_auth
 .wwebjs_cache
 downloads
+node_modules/

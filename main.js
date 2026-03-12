@@ -1,44 +1,54 @@
+// main_global.js
+console.log("[CARREGANDO] Aguarde...");
+
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
-
 import qrcode from 'qrcode-terminal';
 import fs from 'fs';
+import { exec } from 'child_process';
 
-const CHAT_ID_ALVO = process.argv[2];
-if (!CHAT_ID_ALVO) {
-    console.error("Use: node main.js <ID_DO_CHAT>");
-    process.exit(1);
-}
-
-// Cada chat tem um clientId único e persistente
-const CLIENT_ID = `chat_${CHAT_ID_ALVO.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+const CLIENT_ID = "bot_permanente"; // sessão única global
 const BOT_PREFIX = "🤖 *ManyBot:* ";
 
+// lista fixa de chats que queremos interagir
+import { CHATS_PERMITIDOS } from "./env.js"
+// parecido com isso:
+/*
+export const CHATS_PERMITIDOS = [
+    "123456789101234567@c.us", // pedrinho
+    "987654321012345678@g.us" // escola
+];
+*/
+
+let jogoAtivo = null;
+
+// criar client único
 const client = new Client({
     authStrategy: new LocalAuth({ clientId: CLIENT_ID }),
-    puppeteer: {
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        timeout: 60000,
-    }
+    puppeteer: { headless: true }
 });
 
 client.on('qr', qr => {
-    console.log(`[${CHAT_ID_ALVO}] QR Code gerado. Escaneie apenas uma vez:`);
+    console.log("[BOT] QR Code gerado. Escaneie apenas uma vez:");
     qrcode.generate(qr, { small: true });
 });
 
-client.on('ready', () => console.log(`[${CHAT_ID_ALVO}] WhatsApp conectado.`));
+client.on('ready', () => {
+    exec("clear");
+    console.log("[BOT] WhatsApp conectado e sessão permanente");
+});
 
 client.on('disconnected', reason => {
-    console.warn(`[${CHAT_ID_ALVO}] Desconectado: ${reason}. Tentando reconectar...`);
+    console.warn(`[BOT] Desconectado: ${reason}. Tentando reconectar...`);
     setTimeout(() => client.initialize(), 5000);
 });
 
 client.on('message_create', async msg => {
     try {
         const chat = await msg.getChat();
-        if (chat.id._serialized !== CHAT_ID_ALVO) return;
+
+        // filtra apenas chats permitidos
+        if (!CHATS_PERMITIDOS.includes(chat.id._serialized)) return;
 
         console.log("==================================");
         console.log(`CHAT NAME : ${chat.name || chat.id.user || "Sem nome"}`);
@@ -54,6 +64,7 @@ client.on('message_create', async msg => {
         console.error("[ERRO]", err);
     }
 });
+
 
 // ---------------- Funções de envio ----------------
 
@@ -88,7 +99,6 @@ function iniciarJogo(chat) {
     jogoAtivo = numeroSecreto;
 
     console.log(`[JOGO] ${chat.name}: Número escolhido ${numeroSecreto}`);
-    chat.sendMessage(botMsg("Hora do jogo! Tentem adivinhar o número de 1 a 100!"));
 }
 
 // ---------------- Download ----------------
@@ -101,45 +111,64 @@ let processingQueue = false;
 // Garantir que a pasta downloads exista
 if (!fs.existsSync('downloads')) fs.mkdirSync('downloads');
 
-import { exec } from "child_process";
+function runYtDlp(cmd1, cmd2) {
+    return new Promise((resolve, reject) => {
+        exec(cmd1, (error, stdout, stderr) => {
+            if (!error) return resolve({ stdout, stderr });
+
+            exec(cmd2, (error2, stdout2, stderr2) => {
+                if (error2) return reject(error2);
+                resolve({ stdout: stdout2, stderr: stderr2 });
+            });
+        });
+    });
+}
 
 function get_video(url, id) {
     downloadsAtivos++;
 
-    return new Promise((resolve, reject) => {
-        const cmd = `yt-dlp -t mp4 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
+    return new Promise(async (resolve, reject) => {
+        const cmd1 = `yt-dlp -t mp4 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
+        const cmd2 = `.\yt-dlp.exe -t mp4 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
 
-        exec(cmd, (error, stdout, stderr) => {
+        try {
+            const { stdout, stderr } = await runYtDlp(cmd1, cmd2);
             downloadsAtivos--;
 
             if (stderr) console.error(stderr);
-            if (error) return reject(new Error(`yt-dlp falhou: ${error.message}`));
 
             const filepath = stdout.trim();
             if (!filepath) return reject(new Error("yt-dlp não retornou filepath"));
 
             resolve(filepath);
-        });
+        } catch (err) {
+            downloadsAtivos--;
+            reject(new Error(`yt-dlp falhou: ${err.message}`));
+        }
     });
 }
 
 function get_audio(url, id) {
     downloadsAtivos++;
 
-    return new Promise((resolve, reject) => {
-        const cmd = `yt-dlp -t mp3 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
+    return new Promise(async (resolve, reject) => {
+        const cmd1 = `yt-dlp -t mp3 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
+        const cmd2 = `.\yt-dlp.exe -t mp3 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
 
-        exec(cmd, (error, stdout, stderr) => {
+        try {
+            const { stdout, stderr } = await runYtDlp(cmd1, cmd2);
             downloadsAtivos--;
 
             if (stderr) console.error(stderr);
-            if (error) return reject(new Error(`yt-dlp falhou: ${error.message}`));
 
             const filepath = stdout.trim();
             if (!filepath) return reject(new Error("yt-dlp não retornou filepath"));
 
             resolve(filepath);
-        });
+        } catch (err) {
+            downloadsAtivos--;
+            reject(new Error(`yt-dlp falhou: ${err.message}`));
+        }
     });
 }
 
@@ -188,7 +217,7 @@ async function processarComando(msg) {
     if (tokens.length === 1) {
         chat.sendMessage(botMsg(
             "- `!many ping` -> testa se estou funcionando\n" +
-            "- `!many jogo` -> jogo de adivinhação\n" +
+            "- `!many adivinhação <começar|parar>` -> jogo de adivinhação\n" +
             "- `!many video <link>` -> baixo um vídeo da internet para você!\n" +
             "- `!many audio <link>` -> baixo um audio da internet para você!"
         ));
@@ -196,7 +225,20 @@ async function processarComando(msg) {
     }
 
     if (tokens[1] === "ping") chat.sendMessage(botMsg("pong 🏓"));
-    if (tokens[1] === "jogo") iniciarJogo(chat);
+    if (tokens[1] === "adivinhação") {
+        if (tokens[2] === undefined) {
+            chat.sendMessage(botMsg("Acho que você se esqueceu de algo! 😅\n" +
+                                        "🏁 `!many adivinhação começar` -> começa o jogo\n" +
+                                        "🛑 `!many adivinhação parar` -> para o jogo atual"
+                                    ));
+        } else if (tokens[2] === "começar") {
+            iniciarJogo(chat);
+            chat.sendMessage(botMsg("Hora do jogo! 🏁 Tentem adivinhar o número de 1 a 100 que eu estou pensando!"));
+        } else if (tokens[2] === "parar") {
+            jogoAtivo = null
+            chat.sendMessage(botMsg("O jogo atual foi interrompido 🛑"));
+        }
+    }
 
     if (tokens[1] === "video" && tokens[2]) {
         chat.sendMessage(botMsg("⏳ Baixando vídeo, aguarde..."));
