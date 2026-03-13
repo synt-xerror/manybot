@@ -1,64 +1,67 @@
-// main_global.js
 console.log("[CARREGANDO] Aguarde...");
 
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
+
 import qrcode from 'qrcode-terminal';
 import fs from 'fs';
 import { exec } from 'child_process';
+import sharp from 'sharp';
 
-const CLIENT_ID = "bot_permanente"; // sessão única global
+import { CHATS } from "./env.js";
+
+const CLIENT_ID = "bot_permanente";
 const BOT_PREFIX = "🤖 *ManyBot:* ";
-
-// lista fixa de chats que queremos interagir
-import { CHATS_PERMITIDOS } from "./env.js"
-// parecido com isso:
-/*
-export const CHATS_PERMITIDOS = [
-    "123456789101234567@c.us", // pedrinho
-    "987654321012345678@g.us" // escola
-];
-*/
 
 let jogoAtivo = null;
 
-// criar client único
+if (!fs.existsSync("downloads")) fs.mkdirSync("downloads");
+
 const client = new Client({
     authStrategy: new LocalAuth({ clientId: CLIENT_ID }),
     puppeteer: { headless: true }
 });
 
-client.on('qr', qr => {
-    console.log("[BOT] QR Code gerado. Escaneie apenas uma vez:");
+function botMsg(texto) {
+    return `${BOT_PREFIX}\n${texto}`;
+}
+
+function getChatId(chat) {
+    return chat.id._serialized;
+}
+
+client.on("qr", qr => {
+    console.log("[BOT] Escaneie o QR Code");
     qrcode.generate(qr, { small: true });
 });
 
-client.on('ready', () => {
+client.on("ready", () => {
     exec("clear");
-    console.log("[BOT] WhatsApp conectado e sessão permanente");
+    console.log("[BOT] WhatsApp conectado.");
 });
 
-client.on('disconnected', reason => {
-    console.warn(`[BOT] Desconectado: ${reason}. Tentando reconectar...`);
+client.on("disconnected", reason => {
+    console.warn("[BOT] Reconectando:", reason);
     setTimeout(() => client.initialize(), 5000);
 });
 
-client.on('message_create', async msg => {
+client.on("message_create", async msg => {
     try {
-        const chat = await msg.getChat();
 
-        // filtra apenas chats permitidos
-        if (!CHATS_PERMITIDOS.includes(chat.id._serialized)) return;
+        const chat = await msg.getChat();
+        const chatId = getChatId(chat);
+
+        if (!CHATS.includes(chatId)) return;
 
         console.log("==================================");
-        console.log(`CHAT NAME : ${chat.name || chat.id.user || "Sem nome"}`);
-        console.log(`CHAT ID   : ${chat.id._serialized}`);
+        console.log(`CHAT NAME : ${chat.name || chat.id.user}`);
+        console.log(`CHAT ID   : ${chatId}`);
         console.log(`FROM      : ${msg.from}`);
         console.log(`BODY      : ${msg.body}`);
         console.log("==================================\n");
 
-        await processarComando(msg);
-        await processarJogo(msg);
+        await processarComando(msg, chat, chatId);
+        await processarJogo(msg, chat);
 
     } catch (err) {
         console.error("[ERRO]", err);
@@ -66,207 +69,316 @@ client.on('message_create', async msg => {
 });
 
 
-// ---------------- Funções de envio ----------------
+// ---------------- DOWNLOAD ----------------
 
-async function enviarVideo(cliente, chatId, caminhoArquivo) {
-    if (!fs.existsSync(caminhoArquivo)) throw new Error(`Arquivo não encontrado: ${caminhoArquivo}`);
-
-    const arquivo = fs.readFileSync(caminhoArquivo);
-    const media = new MessageMedia('video/mp4', arquivo.toString('base64'), caminhoArquivo.split('/').pop());
-
-    await cliente.sendMessage(chatId, media, { sendMediaAsDocument: false });
-    fs.unlinkSync(caminhoArquivo);
-    console.log(`[BOT] Vídeo enviado e removido: ${caminhoArquivo}`);
-}
-
-async function enviarAudio(cliente, chatId, caminhoArquivo) {
-    if (!fs.existsSync(caminhoArquivo)) throw new Error(`Arquivo não encontrado: ${caminhoArquivo}`);
-
-    const arquivo = fs.readFileSync(caminhoArquivo);
-    const media = new MessageMedia('audio/mpeg', arquivo.toString('base64'), caminhoArquivo.split('/').pop());
-
-    await cliente.sendMessage(chatId, media, { sendAudioAsVoice: false });
-    fs.unlinkSync(caminhoArquivo);
-    console.log(`[BOT] Áudio enviado e removido: ${caminhoArquivo}`);
-}
-
-function botMsg(texto) {
-    return `${BOT_PREFIX}\n${texto}`;
-}
-
-function iniciarJogo(chat) {
-    const numeroSecreto = Math.floor(Math.random() * 100) + 1;
-    jogoAtivo = numeroSecreto;
-
-    console.log(`[JOGO] ${chat.name}: Número escolhido ${numeroSecreto}`);
-}
-
-// ---------------- Download ----------------
-
-let downloadsAtivos = 0;
-const MAX_DOWNLOADS = 2;
-const downloadQueue = [];
+let downloadQueue = [];
 let processingQueue = false;
 
-// Garantir que a pasta downloads exista
-if (!fs.existsSync('downloads')) fs.mkdirSync('downloads');
-
-function runYtDlp(cmd1, cmd2) {
+function run(cmd) {
     return new Promise((resolve, reject) => {
-        exec(cmd1, (error, stdout, stderr) => {
-            if (!error) return resolve({ stdout, stderr });
-
-            exec(cmd2, (error2, stdout2, stderr2) => {
-                if (error2) return reject(error2);
-                resolve({ stdout: stdout2, stderr: stderr2 });
-            });
+        exec(cmd, (err, stdout, stderr) => {
+            if (err) reject(err);
+            else resolve({ stdout, stderr });
         });
     });
 }
 
-function get_video(url, id) {
-    downloadsAtivos++;
+async function get_video(url, id) {
 
-    return new Promise(async (resolve, reject) => {
-        const cmd1 = `yt-dlp -t mp4 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
-        const cmd2 = `.\yt-dlp.exe -t mp4 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
+    const cmd = `./yt-dlp --extractor-args "youtube:player_client=android" -f mp4 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
 
-        try {
-            const { stdout, stderr } = await runYtDlp(cmd1, cmd2);
-            downloadsAtivos--;
+    const { stdout } = await run(cmd);
 
-            if (stderr) console.error(stderr);
+    const filepath = stdout.trim();
+    if (!filepath) throw new Error("yt-dlp não retornou caminho");
 
-            const filepath = stdout.trim();
-            if (!filepath) return reject(new Error("yt-dlp não retornou filepath"));
-
-            resolve(filepath);
-        } catch (err) {
-            downloadsAtivos--;
-            reject(new Error(`yt-dlp falhou: ${err.message}`));
-        }
-    });
+    return filepath;
 }
 
-function get_audio(url, id) {
-    downloadsAtivos++;
+async function get_audio(url, id) {
 
-    return new Promise(async (resolve, reject) => {
-        const cmd1 = `yt-dlp -t mp3 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
-        const cmd2 = `.\yt-dlp.exe -t mp3 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
+    const cmd = `./yt-dlp --extractor-args "youtube:player_client=android" -t mp3 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
 
-        try {
-            const { stdout, stderr } = await runYtDlp(cmd1, cmd2);
-            downloadsAtivos--;
+    const { stdout } = await run(cmd);
 
-            if (stderr) console.error(stderr);
+    const filepath = stdout.trim();
+    if (!filepath) throw new Error("yt-dlp não retornou caminho");
 
-            const filepath = stdout.trim();
-            if (!filepath) return reject(new Error("yt-dlp não retornou filepath"));
-
-            resolve(filepath);
-        } catch (err) {
-            downloadsAtivos--;
-            reject(new Error(`yt-dlp falhou: ${err.message}`));
-        }
-    });
+    return filepath;
 }
 
-function enqueueDownload(type, url, msg) {
-    return new Promise((resolve, reject) => {
-        downloadQueue.push({ type, url, msg, resolve, reject });
-        processQueue();
-    });
+async function enviarVideo(chatId, path) {
+
+    const file = fs.readFileSync(path);
+
+    const media = new MessageMedia(
+        "video/mp4",
+        file.toString("base64"),
+        path.split("/").pop()
+    );
+
+    await client.sendMessage(chatId, media);
+
+    fs.unlinkSync(path);
+}
+
+async function enviarAudio(chatId, path) {
+    const file = fs.readFileSync(path);
+
+    const media = new MessageMedia(
+        "audio/mpeg",
+        file.toString("base64"),
+        path.split("/").pop()
+    );
+
+    await client.sendMessage(chatId, media);
+
+    fs.unlinkSync(path);
+}
+
+function enqueueDownload(type, url, msg, chatId) {
+    downloadQueue.push({ type, url, msg, chatId });
+    if (!processingQueue) processQueue();
 }
 
 async function processQueue() {
-    if (processingQueue) return;
     processingQueue = true;
-
     while (downloadQueue.length) {
-        const { type, url, msg, resolve, reject } = downloadQueue.shift();
-        const chat = await msg.getChat();
-        const chatId = chat.id._serialized;
+        const job = downloadQueue.shift();
+
         try {
-            let caminho;
-            if (type === 'video') caminho = await get_video(url, msg.id._serialized);
-            else caminho = await get_audio(url, msg.id._serialized);
+            let path;
 
-            if (type === 'video') await enviarVideo(client, chatId, caminho);
-            else await enviarAudio(client, chatId, caminho);
+            if (job.type === "video")
+                path = await get_video(job.url, job.msg.id._serialized);
+            else
+                path = await get_audio(job.url, job.msg.id._serialized);
 
-            resolve(caminho);
+            if (job.type === "video")
+                await enviarVideo(job.chatId, path);
+            else
+                await enviarAudio(job.chatId, path);
+
         } catch (err) {
-            reject(err);
-            const chat = await msg.getChat();
-            chat.sendMessage(botMsg(`❌ Erro ao baixar ${type}: ${err.message}`));
+            await client.sendMessage(
+                job.chatId,
+                botMsg(`❌ Erro ao baixar ${job.type}\n\`${err.message}\``)
+            );
         }
     }
-
     processingQueue = false;
 }
 
-// ---------------- Comandos ----------------
 
-async function processarComando(msg) {
-    const tokens = msg.body.trim().split(/\s+/);
-    if (tokens[0] !== "!many") return;
+// ---------------- FIGURINHA ----------------
 
-    const chat = await msg.getChat();
-
-    if (tokens.length === 1) {
-        chat.sendMessage(botMsg(
-            "- `!many ping` -> testa se estou funcionando\n" +
-            "- `!many adivinhação <começar|parar>` -> jogo de adivinhação\n" +
-            "- `!many video <link>` -> baixo um vídeo da internet para você!\n" +
-            "- `!many audio <link>` -> baixo um audio da internet para você!"
-        ));
+async function gerarSticker(msg) {
+    if (!msg.hasMedia) {
+        await msg.reply(botMsg("Envie uma imagem junto com o comando: `!figurinha`."));
         return;
     }
 
-    if (tokens[1] === "ping") chat.sendMessage(botMsg("pong 🏓"));
-    if (tokens[1] === "adivinhação") {
-        if (tokens[2] === undefined) {
-            chat.sendMessage(botMsg("Acho que você se esqueceu de algo! 😅\n" +
-                                        "🏁 `!many adivinhação começar` -> começa o jogo\n" +
-                                        "🛑 `!many adivinhação parar` -> para o jogo atual"
-                                    ));
-        } else if (tokens[2] === "começar") {
-            iniciarJogo(chat);
-            chat.sendMessage(botMsg("Hora do jogo! 🏁 Tentem adivinhar o número de 1 a 100 que eu estou pensando!"));
-        } else if (tokens[2] === "parar") {
-            jogoAtivo = null
-            chat.sendMessage(botMsg("O jogo atual foi interrompido 🛑"));
+    const media = await msg.downloadMedia();
+
+    const ext = media.mimetype.split("/")[1];
+
+    const input = `downloads/${msg.id._serialized}.${ext}`;
+    const output = `downloads/${msg.id._serialized}.webp`;
+
+    fs.writeFileSync(input, Buffer.from(media.data, "base64"));
+
+    await sharp(input)
+        .resize(512, 512, {
+            fit: "contain",
+            background: { r:0,g:0,b:0,alpha:0 }
+        })
+        .webp()
+        .toFile(output);
+
+    const data = fs.readFileSync(output);
+
+    const sticker = new MessageMedia(
+        "image/webp",
+        data.toString("base64"),
+        "sticker.webp"
+    );
+
+    const chat = await msg.getChat();
+
+    await client.sendMessage(
+        chat.id._serialized,
+        sticker,
+        { sendMediaAsSticker: true }
+    );
+
+    fs.unlinkSync(input);
+    fs.unlinkSync(output);
+}
+
+
+// ---------------- COMANDOS ----------------
+
+async function processarComando(msg, chat, chatId) {
+    const tokens = msg.body.trim().split(/\s+/);
+    try {
+        switch(tokens[0]) {
+
+            case "!many":
+                await chat.sendMessage(botMsg(
+                    "Comandos:\n\n"+
+                    "`!ping`\n"+
+                    "`!video <link>`\n"+
+                    "`!audio <link>`\n"+
+                    "`!figurinha`\n"+
+                    "`!adivinhação começar|parar`\n"+
+                    "`!info <comando>`"
+                ));
+            break;
+
+
+            case "!ping":
+                await msg.reply(botMsg("pong 🏓"));
+            break;
+
+
+            case "!video":
+                if (!tokens[1]) return;
+
+                await msg.reply(botMsg("⏳ Baixando vídeo..."));
+                enqueueDownload("video", tokens[1], msg, chatId);
+            break;
+
+
+            case "!audio":
+                if (!tokens[1]) return;
+
+                await msg.reply(botMsg("⏳ Baixando áudio..."));
+                enqueueDownload("audio", tokens[1], msg, chatId);
+            break;
+
+            case "!figurinha":
+                await gerarSticker(msg);
+            break;
+
+
+            case "!adivinhação":
+                if (!tokens[1]) {
+                    await chat.sendMessage(botMsg(
+                        "`!adivinhação começar`\n"+
+                        "`!adivinhação parar`"
+                    ));
+                    return;
+                }
+
+                if (tokens[1] === "começar") {
+                    jogoAtivo = Math.floor(Math.random()*100)+1;
+
+                    await chat.sendMessage(botMsg(
+                        "Adivinhe o número de 1 a 100!"
+                    ));
+                }
+
+                if (tokens[1] === "parar") {
+                    jogoAtivo = null;
+
+                    await chat.sendMessage(botMsg("Jogo encerrado."));
+                }
+            break;
+
+
+            case "A":
+                if (!tokens[1]) {
+                    msg.reply(botMsg("B!"));
+                }
+            break;
+            case "a":
+                if (!tokens[1]) {
+                    msg.reply(botMsg("B!"));
+                }
+            break;
+
+            case "!info":
+
+               if (!tokens[1]) {
+                   await chat.sendMessage(botMsg(
+                       "Use:\n" +
+                       "`!info <comando>`"
+                   ));
+                   return;
+               }
+           
+               switch(tokens[1]) {
+
+                   case "ping":
+                       await chat.sendMessage(botMsg(
+                           "> `!ping`\nResponde pong."
+                       ));
+                   break;
+                   
+                   case "video":
+                       await chat.sendMessage(botMsg(
+                           "> `!video <link>`\nBaixa vídeo da internet.\n"
+                       ));
+                   break;
+                   
+                   case "audio":
+                       await chat.sendMessage(botMsg(
+                           "> `!audio <link>`\nBaixa áudio da internet.\n"
+                       ));
+                   break;
+                   
+                   case "figurinha":
+                       await chat.sendMessage(botMsg(
+                           "`!figurinha`\nTransforma imagem/GIF em sticker."
+                       ));
+                   break;
+                   
+                   default:
+                       await chat.sendMessage(botMsg(
+                           `❌ Comando '${tokens[1]}' não encontrado.`
+                       ));
+               }
+           
+            break;
         }
-    }
-
-    if (tokens[1] === "video" && tokens[2]) {
-        chat.sendMessage(botMsg("⏳ Baixando vídeo, aguarde..."));
-        enqueueDownload('video', tokens[2], msg);
-    }
-
-    if (tokens[1] === "audio" && tokens[2]) {
-        chat.sendMessage(botMsg("⏳ Baixando áudio, aguarde..."));
-        enqueueDownload('audio', tokens[2], msg);
+    } catch(err) {
+        console.error(err);
+        await chat.sendMessage(
+            botMsg("Erro:\n`"+err.message+"`")
+        );
     }
 }
 
-// ---------------- Jogo ----------------
 
-async function processarJogo(msg) {
-    const chat = await msg.getChat();
+// ---------------- JOGO ----------------
+
+async function processarJogo(msg, chat) {
+
     if (!jogoAtivo) return;
 
     const tentativa = msg.body.trim();
+
     if (!/^\d+$/.test(tentativa)) return;
 
-    const num = parseInt(tentativa, 10);
+    const num = parseInt(tentativa);
 
     if (num === jogoAtivo) {
-        chat.sendMessage(botMsg(`Parabéns! Você acertou! Número: ${jogoAtivo}`));
+
+        await msg.reply(botMsg(`Acertou! Número: ${jogoAtivo}`));
+
         jogoAtivo = null;
-    } else if (num > jogoAtivo) chat.sendMessage(botMsg(`Quase! Um pouco menor. Sua resposta: ${num}`));
-    else chat.sendMessage(botMsg(`Quase! Um pouco maior. Sua resposta: ${num}`));
+
+    }
+    else if (num > jogoAtivo) {
+
+        await chat.sendMessage(botMsg("Menor."));
+
+    }
+    else {
+
+        await chat.sendMessage(botMsg("Maior."));
+
+    }
 }
 
 client.initialize();

@@ -20,16 +20,14 @@ const client = new Client({
 });
 
 client.on('qr', qr => {
-    console.log("[BOT] QR Code gerado. Escaneie apenas uma vez:");
+    console.log("[WPP] QR Code gerado. Escaneie apenas uma vez:");
     qrcode.generate(qr, { small: true });
 });
 
-client.on('ready', () => {
-    console.log("[BOT] WhatsApp conectado e sessão permanente");
-});
-
 client.on('ready', async () => {
-    const chats = await client.getChats();
+    console.log("[WPP] Conectado");
+
+    const chats = await client.getChats(); // <- precisa do await
 
     let filtered = [];
 
@@ -54,7 +52,7 @@ client.on('ready', async () => {
         });
     }
 
-    process.exit(0); // fecha o script após listar
+    process.exit(0);
 });
 
 client.initialize();
