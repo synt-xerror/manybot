@@ -1,64 +1,72 @@
-import { exec } from "child_process";
-import fs from "fs";
-import path from "path";
-import https from "https";
-import http from "http";
+#!/bin/bash
+set -e
 
-// Função para rodar comandos de shell
-function runCmd(cmd) {
-  return new Promise((resolve, reject) => {
-    const p = exec(cmd, (err, stdout, stderr) => {
-      if (err) return reject(err);
-      resolve({ stdout, stderr });
-    });
-    p.stdout.pipe(process.stdout);
-    p.stderr.pipe(process.stderr);
-  });
+# Função para rodar comando mostrando saída
+run_cmd() {
+    echo "+ $*"
+    "$@"
 }
 
-// Função para baixar arquivo
-function downloadFile(url, dest) {
-  return new Promise((resolve, reject) => {
-    if (fs.existsSync(dest)) {
-      console.log(`${dest} já existe, pulando download.`);
-      return resolve();
-    }
+# Função para baixar arquivos se não existirem
+download_file() {
+    local url="$1"
+    local dest="$2"
 
-    console.log(`Baixando ${url} → ${dest}`);
-    const file = fs.createWriteStream(dest);
-    const client = url.startsWith("https") ? https : http;
+    if [[ -f "$dest" ]]; then
+        echo "$dest já existe, pulando download."
+        return
+    fi
 
-    client.get(url, (res) => {
-      if (res.statusCode >= 400) return reject(new Error(`Erro ao baixar ${url}: ${res.statusCode}`));
-      res.pipe(file);
-      file.on("finish", () => file.close(resolve));
-    }).on("error", (err) => {
-      fs.unlink(dest, () => reject(err));
-    });
-  });
+    echo "Baixando $url → $dest"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -L "$url" -o "$dest"
+    elif command -v wget >/dev/null 2>&1; then
+        wget "$url" -O "$dest"
+    else
+        echo "Erro: curl ou wget são necessários para baixar arquivos."
+        exit 1
+    fi
+
+    chmod +x "$dest" 2>/dev/null || true
 }
 
-async function main() {
-  // setup do npm
-  await runCmd("npm ci");
+# Detecta plataforma
+PLATFORM=""
+case "$(uname -s)" in
+    Linux*)   PLATFORM="linux";;
+    Darwin*)  PLATFORM="mac";;
+    MINGW*|MSYS*|CYGWIN*) PLATFORM="win";;
+    *)        PLATFORM="unknown";;
+esac
 
-  // cria pasta para binários
-  const binDir = path.resolve("bin");
-  if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+echo "Plataforma detectada: $PLATFORM"
 
-  // downloads
-  const files = [
-    ["https://github.com/synt-xerror/manybot/releases/download/dependencies/yt-dlp.exe", "yt-dlp.exe"],
-    ["https://github.com/synt-xerror/manybot/releases/download/dependencies/yt-dlp.exe", "yt-dlp"],
-    ["https://github.com/synt-xerror/manybot/releases/download/dependencies/yt-dlp.exe", "ffmpeg.exe"],
-    ["https://github.com/synt-xerror/manybot/releases/download/dependencies/yt-dlp.exe", "ffmpeg"]
-  ];
+# Setup npm
+run_cmd npm ci
 
-  for (const [url, name] of files) {
-    await downloadFile(url, path.join(binDir, name));
-  }
+# Cria pasta bin
+mkdir -p bin
 
-  console.log("Setup concluído.");
-}
+# Arquivos por plataforma
+files=()
+if [[ "$PLATFORM" == "win" ]]; then
+    files=(
+        "https://github.com/synt-xerror/manybot/releases/download/dependencies/yt-dlp.exe bin/yt-dlp.exe"
+        "https://github.com/synt-xerror/manybot/releases/download/dependencies/ffmpeg.exe bin/ffmpeg.exe"
+    )
+else
+    files=(
+        "https://github.com/synt-xerror/manybot/releases/download/dependencies/yt-dlp bin/yt-dlp"
+        "https://github.com/synt-xerror/manybot/releases/download/dependencies/ffmpeg bin/ffmpeg"
+    )
+fi
 
-main().catch(console.error);
+# Baixa todos os arquivos
+for file in "${files[@]}"; do
+    url="${file%% *}"
+    dest="${file##* }"
+    download_file "$url" "$dest"
+done
+
+echo "Setup concluído."42
