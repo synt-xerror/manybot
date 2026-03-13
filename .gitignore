@@ -1,7 +1,7 @@
-env.js
+env
 .wwebjs_auth
 .wwebjs_cache
 downloads
-node_modules/
+src/node_modules/
 cookies.txt
 bin/
