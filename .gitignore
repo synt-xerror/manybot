@@ -3,3 +3,5 @@ env.js
 .wwebjs_cache
 downloads
 node_modules/
+cookies.txt
+bin/

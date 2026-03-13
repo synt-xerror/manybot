@@ -5,8 +5,12 @@ const { Client, LocalAuth, MessageMedia } = pkg;
 
 import qrcode from 'qrcode-terminal';
 import fs from 'fs';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import sharp from 'sharp';
+import os from 'os';
+import path from "path";
+
+console.log(os.platform());
 
 import { CHATS } from "./env.js";
 
@@ -30,6 +34,8 @@ function getChatId(chat) {
     return chat.id._serialized;
 }
 
+// ---------------- Eventos ----------------
+
 client.on("qr", qr => {
     console.log("[BOT] Escaneie o QR Code");
     qrcode.generate(qr, { small: true });
@@ -47,7 +53,6 @@ client.on("disconnected", reason => {
 
 client.on("message_create", async msg => {
     try {
-
         const chat = await msg.getChat();
         const chatId = getChatId(chat);
 
@@ -68,27 +73,74 @@ client.on("message_create", async msg => {
     }
 });
 
-
-// ---------------- DOWNLOAD ----------------
+// ---------------- Download ----------------
 
 let downloadQueue = [];
 let processingQueue = false;
 
-function run(cmd) {
+function run(cmd, args) {
     return new Promise((resolve, reject) => {
-        exec(cmd, (err, stdout, stderr) => {
-            if (err) reject(err);
-            else resolve({ stdout, stderr });
+        const proc = spawn(cmd, args);
+
+        let stdout = "";
+
+        proc.stdout.on("data", data => {
+            const text = data.toString();
+            stdout += text;
+            console.log("[cmd]", text);
+        });
+
+        proc.stderr.on("data", data => {
+            console.error("[cmd ERR]", data.toString());
+        });
+
+        proc.on("close", code => {
+            if (code !== 0) reject(new Error("Processo saiu com código " + code));
+            else resolve(stdout);
         });
     });
 }
 
+const so = os.platform();
+
 async function get_video(url, id) {
+    let cmd = "";
+    const cmd_lin = "./bin/yt-dlp";
+    const cmd_win = ".\\bin\\yt-dlp.exe";
 
-    const cmd = `./yt-dlp --extractor-args "youtube:player_client=android" -f mp4 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
+    switch (so) {
+        case "win32":
+            cmd = cmd_win;
+            break;
+        case "linux":
+            cmd = cmd_lin;
+            break;
+    }
 
-    const { stdout } = await run(cmd);
+    const args = [
+      '--extractor-args', 'youtube:player_client=android', // mantém seu client preferido
+      '-f', 'bv+ba/best',                                 // tentar vídeo+áudio; fallback para best
+      '--print', 'after_move:filepath',
+      '--output', `downloads/${id}.%(ext)s`,
+    
+      // autenticacao (use cookies exportado com yt-dlp ou --cookies-from-browser)
+      '--cookies', 'cookies.txt',                         // arquivo de cookies (gerar antes)
+      // cabeçalhos para reduzir 403
+      '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      '--add-header', 'Referer:https://www.youtube.com/',
+      // tolerância de rede
+      '--retries', '4',
+      '--fragment-retries', '5',
+      '--socket-timeout', '15',
+      '--sleep-interval', '1', '--max-sleep-interval', '4',
+      // permitir formatos que podem ser marcados como "unplayable" (útil em alguns casos)
+      '--allow-unplayable-formats',
+      // testes / debug: use -v quando precisar diagnosticar
+      // url
+      url
+    ];
 
+    const stdout = await run(cmd, args);
     const filepath = stdout.trim();
     if (!filepath) throw new Error("yt-dlp não retornou caminho");
 
@@ -96,44 +148,65 @@ async function get_video(url, id) {
 }
 
 async function get_audio(url, id) {
+    const video = await get_video(url, id);
+    const output = `downloads/${id}.mp3`;
 
-    const cmd = `./yt-dlp --extractor-args "youtube:player_client=android" -t mp3 --print after_move:filepath -o "downloads/${id}.%(ext)s" "${url}"`;
+    let cmd = "";
+    const cmd_lin = "./bin/ffmpeg";
+    const cmd_win = ".\\bin\\ffmpeg.exe";
 
-    const { stdout } = await run(cmd);
+    switch (so) {
+        case "win32":
+            cmd = cmd_win;
+            break;
+        case "linux":
+            cmd = cmd_lin;
+            break;
+    }
 
-    const filepath = stdout.trim();
-    if (!filepath) throw new Error("yt-dlp não retornou caminho");
+    const args = [
+      '-i', video,
+      '-vn', '-acodec',
+      'libmp3lame', '-q:a', '2',
+      output
+    ];
 
-    return filepath;
+    await run(cmd, args);
+
+    return output;
+}
+
+function empty_folder(folder) {
+    fs.readdirSync(folder).forEach(file => {
+        const filePath = path.join(folder, file);
+        if (fs.lstatSync(filePath).isFile()) {
+            fs.unlinkSync(filePath);
+        }
+    });
 }
 
 async function enviarVideo(chatId, path) {
-
     const file = fs.readFileSync(path);
-
     const media = new MessageMedia(
         "video/mp4",
         file.toString("base64"),
         path.split("/").pop()
     );
-
     await client.sendMessage(chatId, media);
-
     fs.unlinkSync(path);
+    empty_folder("./downloads");
 }
 
 async function enviarAudio(chatId, path) {
     const file = fs.readFileSync(path);
-
     const media = new MessageMedia(
         "audio/mpeg",
         file.toString("base64"),
         path.split("/").pop()
     );
-
     await client.sendMessage(chatId, media);
-
     fs.unlinkSync(path);
+    empty_folder("./downloads");
 }
 
 function enqueueDownload(type, url, msg, chatId) {
@@ -145,10 +218,8 @@ async function processQueue() {
     processingQueue = true;
     while (downloadQueue.length) {
         const job = downloadQueue.shift();
-
         try {
             let path;
-
             if (job.type === "video")
                 path = await get_video(job.url, job.msg.id._serialized);
             else
@@ -169,8 +240,7 @@ async function processQueue() {
     processingQueue = false;
 }
 
-
-// ---------------- FIGURINHA ----------------
+// ---------------- Figurinha ----------------
 
 async function gerarSticker(msg) {
     if (!msg.hasMedia) {
@@ -179,7 +249,6 @@ async function gerarSticker(msg) {
     }
 
     const media = await msg.downloadMedia();
-
     const ext = media.mimetype.split("/")[1];
 
     const input = `downloads/${msg.id._serialized}.${ext}`;
@@ -188,41 +257,26 @@ async function gerarSticker(msg) {
     fs.writeFileSync(input, Buffer.from(media.data, "base64"));
 
     await sharp(input)
-        .resize(512, 512, {
-            fit: "contain",
-            background: { r:0,g:0,b:0,alpha:0 }
-        })
+        .resize(512, 512, { fit: "contain", background: { r:0,g:0,b:0,alpha:0 } })
         .webp()
         .toFile(output);
 
     const data = fs.readFileSync(output);
-
-    const sticker = new MessageMedia(
-        "image/webp",
-        data.toString("base64"),
-        "sticker.webp"
-    );
-
+    const sticker = new MessageMedia("image/webp", data.toString("base64"), "sticker.webp");
     const chat = await msg.getChat();
 
-    await client.sendMessage(
-        chat.id._serialized,
-        sticker,
-        { sendMediaAsSticker: true }
-    );
+    await client.sendMessage(chat.id._serialized, sticker, { sendMediaAsSticker: true });
 
     fs.unlinkSync(input);
     fs.unlinkSync(output);
 }
 
-
-// ---------------- COMANDOS ----------------
+// ---------------- Comandos ----------------
 
 async function processarComando(msg, chat, chatId) {
     const tokens = msg.body.trim().split(/\s+/);
     try {
         switch(tokens[0]) {
-
             case "!many":
                 await chat.sendMessage(botMsg(
                     "Comandos:\n\n"+
@@ -235,23 +289,18 @@ async function processarComando(msg, chat, chatId) {
                 ));
             break;
 
-
             case "!ping":
                 await msg.reply(botMsg("pong 🏓"));
             break;
 
-
             case "!video":
                 if (!tokens[1]) return;
-
                 await msg.reply(botMsg("⏳ Baixando vídeo..."));
                 enqueueDownload("video", tokens[1], msg, chatId);
             break;
 
-
             case "!audio":
                 if (!tokens[1]) return;
-
                 await msg.reply(botMsg("⏳ Baixando áudio..."));
                 enqueueDownload("audio", tokens[1], msg, chatId);
             break;
@@ -260,124 +309,71 @@ async function processarComando(msg, chat, chatId) {
                 await gerarSticker(msg);
             break;
 
-
             case "!adivinhação":
                 if (!tokens[1]) {
-                    await chat.sendMessage(botMsg(
-                        "`!adivinhação começar`\n"+
-                        "`!adivinhação parar`"
-                    ));
+                    await chat.sendMessage(botMsg("`!adivinhação começar`\n`!adivinhação parar`"));
                     return;
                 }
-
                 if (tokens[1] === "começar") {
                     jogoAtivo = Math.floor(Math.random()*100)+1;
-
-                    await chat.sendMessage(botMsg(
-                        "Adivinhe o número de 1 a 100!"
-                    ));
+                    await chat.sendMessage(botMsg("Adivinhe o número de 1 a 100!"));
                 }
-
                 if (tokens[1] === "parar") {
                     jogoAtivo = null;
-
                     await chat.sendMessage(botMsg("Jogo encerrado."));
                 }
             break;
 
-
             case "A":
-                if (!tokens[1]) {
-                    msg.reply(botMsg("B!"));
-                }
-            break;
             case "a":
-                if (!tokens[1]) {
-                    msg.reply(botMsg("B!"));
-                }
+                if (!tokens[1]) await msg.reply(botMsg("B!"));
             break;
 
             case "!info":
-
-               if (!tokens[1]) {
-                   await chat.sendMessage(botMsg(
-                       "Use:\n" +
-                       "`!info <comando>`"
-                   ));
-                   return;
-               }
-           
-               switch(tokens[1]) {
-
-                   case "ping":
-                       await chat.sendMessage(botMsg(
-                           "> `!ping`\nResponde pong."
-                       ));
-                   break;
-                   
-                   case "video":
-                       await chat.sendMessage(botMsg(
-                           "> `!video <link>`\nBaixa vídeo da internet.\n"
-                       ));
-                   break;
-                   
-                   case "audio":
-                       await chat.sendMessage(botMsg(
-                           "> `!audio <link>`\nBaixa áudio da internet.\n"
-                       ));
-                   break;
-                   
-                   case "figurinha":
-                       await chat.sendMessage(botMsg(
-                           "`!figurinha`\nTransforma imagem/GIF em sticker."
-                       ));
-                   break;
-                   
-                   default:
-                       await chat.sendMessage(botMsg(
-                           `❌ Comando '${tokens[1]}' não encontrado.`
-                       ));
-               }
-           
+                if (!tokens[1]) {
+                    await chat.sendMessage(botMsg("Use:\n`!info <comando>`"));
+                    return;
+                }
+                switch(tokens[1]) {
+                    case "ping":
+                        await chat.sendMessage(botMsg("> `!ping`\nResponde pong."));
+                    break;
+                    case "video":
+                        await chat.sendMessage(botMsg("> `!video <link>`\nBaixa vídeo da internet."));
+                    break;
+                    case "audio":
+                        await chat.sendMessage(botMsg("> `!audio <link>`\nBaixa áudio da internet."));
+                    break;
+                    case "figurinha":
+                        await chat.sendMessage(botMsg("`!figurinha`\nTransforma imagem/GIF em sticker."));
+                    break;
+                    default:
+                        await chat.sendMessage(botMsg(`❌ Comando '${tokens[1]}' não encontrado.`));
+                }
             break;
         }
     } catch(err) {
         console.error(err);
-        await chat.sendMessage(
-            botMsg("Erro:\n`"+err.message+"`")
-        );
+        await chat.sendMessage(botMsg("Erro:\n`"+err.message+"`"));
     }
 }
 
-
-// ---------------- JOGO ----------------
+// ---------------- Jogo ----------------
 
 async function processarJogo(msg, chat) {
-
     if (!jogoAtivo) return;
 
     const tentativa = msg.body.trim();
-
     if (!/^\d+$/.test(tentativa)) return;
 
     const num = parseInt(tentativa);
-
     if (num === jogoAtivo) {
-
         await msg.reply(botMsg(`Acertou! Número: ${jogoAtivo}`));
-
         jogoAtivo = null;
-
-    }
-    else if (num > jogoAtivo) {
-
+    } else if (num > jogoAtivo) {
         await chat.sendMessage(botMsg("Menor."));
-
-    }
-    else {
-
+    } else {
         await chat.sendMessage(botMsg("Maior."));
-
     }
 }
 
