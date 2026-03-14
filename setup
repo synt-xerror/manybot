@@ -44,6 +44,12 @@ cat << "EOF"
 | | | | .'|   | | | __ -| . |  _|
 |_|_|_|__,|_|_|_  |_____|___|_|  
               |___|              
+
+website: www.mlplovers.com.br/manybot
+repo: github.com/synt-xerror/manybot
+
+A Amizade é Mágica!
+
 EOF
 echo -e "${RESET}"
 }
