@@ -34,12 +34,9 @@ export const client = new Client({
     }
 });
 
-// debug
-console.log("isTermux:", isTermux);
-console.log(process.env.PREFIX);
-
 client.on("qr", qr => {
     console.log("[BOT] Escaneie o QR Code");
+    console.log(qr);
     qrcode.generate(qr, { small: true });
 });
 
