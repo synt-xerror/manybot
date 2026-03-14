@@ -161,12 +161,11 @@ if [[ "$PREFIX" == *"com.termux"* ]]; then
     node -e "require('sharp')" >/dev/null 2>&1 && log_ok "sharp OK" && return
 
     log_info "Reconstruindo módulo sharp"
+
     rm -rf node_modules/sharp
+    export android_ndk_path=""
 
-    export GYP_DEFINES="OS=linux"
-    export npm_config_build_from_source=true
-
-    run_cmd npm install sharp --build-from-source
+    run_cmd npm install sharp
 fi
 
 # ------------------------
