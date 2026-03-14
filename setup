@@ -142,14 +142,9 @@ if [[ "$PREFIX" == *"com.termux"* ]]; then
 
     deps=(
         chromium
-        pkg-config
-        python3
     )
 
     install_deps "${deps[@]}"
-    
-    log_info "Instalando sharp"
-    run_cmd npm install --os=linux --foreground-scripts sharp
 fi
 
 # ------------------------
