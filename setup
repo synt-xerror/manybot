@@ -157,6 +157,10 @@ if [[ "$PREFIX" == *"com.termux"* ]]; then
         python
         chromium
         libvips
+        xorgproto
+        libx11
+        libxrender
+        libxcd
     )
 
     install_deps "${deps[@]}"
