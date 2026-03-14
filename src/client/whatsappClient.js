@@ -15,6 +15,7 @@ const puppeteerConfig = isTermux
   ? {
         executablePath: "/data/data/com.termux/files/usr/bin/chromium-browser",
         args: [
+            "--headless=new",
             "--no-sandbox",
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
