@@ -110,7 +110,7 @@ esac
 
 log_info "Sistema: $UNAME"
 log_info "Arquitetura: $ARCH"
-log_info "Plataforma: $PLATFORM"]
+log_info "Plataforma: $PLATFORM"
 
 # ------------------------
 # Informações do ambiente
@@ -132,25 +132,38 @@ run_cmd npm ci
 # ------------------------
 # Termux
 # ------------------------
+install_deps() {
+    local packages=("$@")
+
+    for pkg in "${packages[@]}"; do
+        if ! command -v "$pkg" >/dev/null 2>&1; then
+            log_warn "$pkg não encontrado, instalando"
+            run_cmd pkg install -y "$pkg"
+        else
+            log_ok "$pkg já instalado"
+        fi
+    done
+}
+
 if [[ "$PREFIX" == *"com.termux"* ]]; then
     log_info "Ambiente Termux detectado"
 
-    if ! command -v chromium >/dev/null 2>&1; then
-        log_warn "Chromium não encontrado, instalando"
-        run_cmd pkg install -y chromium
-    else
-        log_ok "Chromium já instalado"
-    fi
+    # Lista de dependências
+    deps=(
+        clang
+        make
+        pkg-config
+        python
+        chromium
+        libvips
+    )
 
-    if ! command -v vips >/dev/null 2>&1; then
-        log_warn "libvips não encontrada, instalando"
-        run_cmd pkg install libvips
-    else
-        log_ok "libvips já instalada"
-    fi
+    install_deps "${deps[@]}"
 
     log_info "Reconstruindo módulo sharp"
+    rm -rf node_modules/sharp
     run_cmd npm rebuild sharp
+    node -e "require('sharp'); console.log('sharp OK')"
 fi
 
 # ------------------------
