@@ -1,6 +1,6 @@
 import pkg from "whatsapp-web.js";
 const { MessageMedia } = pkg;
-import sharp from "sharp";
+import sharp from "../utils/sharp-loader.js";
 import fs from "fs";
 import { botMsg } from "../utils/botMsg.js";
 import { client } from "../client/whatsappClient.js"

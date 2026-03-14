@@ -141,31 +141,20 @@ if [[ "$PREFIX" == *"com.termux"* ]]; then
     log_info "Ambiente Termux detectado"
 
     deps=(
-        clang
-        make
+        chromium
         pkg-config
         python3
-        chromium
-        libvips
-        xorgproto
-        libx11
-        libxrender
-        libxcb
     )
 
     install_deps "${deps[@]}"
 
-    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH"
-    export npm_config_platform=linux
+    log_info "Usando sharp via WebAssembly"
 
-    node -e "require('sharp')" >/dev/null 2>&1 && log_ok "sharp OK" && return
-
-    log_info "Reconstruindo módulo sharp"
-
-    rm -rf node_modules/sharp
-    export android_ndk_path=""
-
-    run_cmd npm install sharp
+    if node -e "require('@img/sharp-wasm')" >/dev/null 2>&1; then
+        log_ok "sharp-wasm já instalado"
+    else
+        run_cmd npm install @img/sharp-wasm
+    fi
 fi
 
 # ------------------------
