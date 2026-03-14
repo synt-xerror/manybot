@@ -1,78 +1,113 @@
 #!/bin/bash
 set -e
 
-# Função para rodar comando mostrando saída
-run_cmd() {
-    echo "+ $*"
-    "$@"
+# ------------------------
+# Cores
+# ------------------------
+RESET="\033[0m"
+BOLD="\033[1m"
+
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+BLUE="\033[34m"
+CYAN="\033[36m"
+MAGENTA="\033[35m"
+GRAY="\033[90m"
+
+timestamp() {
+    date +"%H:%M:%S"
 }
 
-# Função para baixar arquivos se não existirem
+log() {
+    local level="$1"
+    local color="$2"
+    shift 2
+    echo -e "${GRAY}[$(timestamp)]${RESET} ${color}${level}${RESET} $*"
+}
+
+log_info()  { log "[INFO]"  "$BLUE" "$@"; }
+log_ok()    { log "[OK]"    "$GREEN" "$@"; }
+log_warn()  { log "[WARN]"  "$YELLOW" "$@"; }
+log_error() { log "[ERROR]" "$RED" "$@"; }
+log_cmd()   { log "[CMD]"   "$CYAN" "${BOLD}$*${RESET}"; }
+log_debug() { log "[DBG]"   "$GRAY" "$@"; }
+
+# ------------------------
+# Banner
+# ------------------------
+print_banner() {
+echo -e "${MAGENTA}${BOLD}"
+cat << "EOF"
+ _____             _____     _   
+|     |___ ___ _ _| __  |___| |_ 
+| | | | .'|   | | | __ -| . |  _|
+|_|_|_|__,|_|_|_  |_____|___|_|  
+              |___|              
+EOF
+echo -e "${RESET}"
+}
+
+print_banner
+log_info "Inicializando setup..."
+
+# ------------------------
+# Executar comandos
+# ------------------------
+run_cmd() {
+    log_cmd "$*"
+    "$@"
+    log_ok "Comando finalizado: $1"
+}
+
+# ------------------------
+# Download
+# ------------------------
 download_file() {
     local url="$1"
     local dest="$2"
 
+    log_debug "download_file(url=$url, dest=$dest)"
+
     if [[ -f "$dest" ]]; then
-        echo "$dest já existe, pulando download."
+        log_warn "Arquivo já existe: $dest"
         return
     fi
 
-    echo "Baixando $url → $dest"
- 
+    log_info "Baixando $url"
+    log_debug "Destino: $dest"
+
     if command -v curl >/dev/null 2>&1; then
+        log_debug "Downloader: curl"
         curl -L "$url" -o "$dest"
     elif command -v wget >/dev/null 2>&1; then
+        log_debug "Downloader: wget"
         wget "$url" -O "$dest"
     else
-        echo "Erro: curl ou wget são necessários para baixar arquivos."
+        log_error "curl ou wget não encontrados"
         exit 1
     fi
 
     chmod +x "$dest" 2>/dev/null || true
+    log_ok "Arquivo pronto: $dest"
 }
 
-# Detecta plataforma
+# ------------------------
+# Detectar plataforma
+# ------------------------
+log_info "Detectando plataforma"
+
+UNAME="$(uname -s)"
+ARCH="$(uname -m)"
+
 PLATFORM=""
-case "$(uname -s)" in
+case "$UNAME" in
     Linux*)   PLATFORM="linux";;
     Darwin*)  PLATFORM="mac";;
     MINGW*|MSYS*|CYGWIN*) PLATFORM="win";;
     *)        PLATFORM="unknown";;
 esac
 
-echo "Plataforma detectada: $PLATFORM"
-
-# Setup npm
-export PUPPETEER_SKIP_DOWNLOAD=1
-run_cmd npm ci
-
-# Instala o chromium manualmente se estiver no termux
-if [[ "$PREFIX" == *"com.termux"* ]]; then
-    command -v chromium >/dev/null 2>&1 || pkg install -y chromium
-fi
-
-# Cria pasta bin
-mkdir -p bin
-
-# Arquivos por plataforma
-files=()
-if [[ "$PLATFORM" == "win" ]]; then
-    files=(
-        "https://github.com/synt-xerror/manybot/releases/download/dependencies/yt-dlp.exe bin/yt-dlp.exe"
-        "https://github.com/synt-xerror/manybot/releases/download/dependencies/ffmpeg.exe bin/ffmpeg.exe"
-    )
-else
-    files=(
-        "https://github.com/synt-xerror/manybot/releases/download/dependencies/yt-dlp bin/yt-dlp"
-        "https://github.com/synt-xerror/manybot/releases/download/dependencies/ffmpeg bin/ffmpeg"
-    )
-fi
-
-# Baixa todos os arquivos
-for file in "${files[@]}"; do
-    url="${file%% *}"
-    dest="${file##* }"
-    download_file "$url" "$dest"
-done
-
-echo "Setup concluído."42
+log_info "Sistema: $UNAME"
+log_info "Arquitetura: $ARCH"
+log_info "Plataforma: $PLATFORM"
