@@ -122,15 +122,6 @@ log_debug "npm:  $(npm -v 2>/dev/null || echo 'não encontrado')"
 log_debug "PREFIX: ${PREFIX:-<vazio>}"
 
 # ------------------------
-# Setup npm
-# ------------------------
-log_info "Instalando dependências npm"
-
-export PUPPETEER_SKIP_DOWNLOAD=1
-run_cmd npm install
-run_cmd npm ci
-
-# ------------------------
 # Termux
 # ------------------------
 install_deps() {
@@ -173,6 +164,15 @@ if [[ "$PREFIX" == *"com.termux"* ]]; then
     rm -rf node_modules/sharp
     run_cmd npm rebuild sharp
 fi
+
+# ------------------------
+# Setup npm
+# ------------------------
+log_info "Instalando dependências npm"
+
+export PUPPETEER_SKIP_DOWNLOAD=1
+run_cmd npm install
+run_cmd npm ci
 
 # ------------------------
 # Diretórios
