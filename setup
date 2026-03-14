@@ -147,14 +147,9 @@ if [[ "$PREFIX" == *"com.termux"* ]]; then
     )
 
     install_deps "${deps[@]}"
-
-    log_info "Usando sharp via WebAssembly"
-
-    if node -e "require('@img/sharp-wasm32')" >/dev/null 2>&1; then
-        log_ok "sharp-wasm já instalado"
-    else
-        npm_config_cpu=wasm32 npm install @img/sharp-wasm32
-    fi
+    
+    log_info "Instalando sharp"
+    run_cmd npm install --os=linux --foreground-scripts sharp
 fi
 
 # ------------------------
