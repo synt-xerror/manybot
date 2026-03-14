@@ -2,13 +2,31 @@ import pkg from "whatsapp-web.js";
 import qrcode from "qrcode-terminal";
 import { exec } from "child_process";
 import { CLIENT_ID } from "../config.js";
+import os from "os";
 
 export const { Client, LocalAuth, MessageMedia } = pkg;
 
+// detecta termux, e usa o executável do chromium do sistema em vez do puppeteer
+const isTermux =
+  os.platform() === "linux" &&
+  process.env.PREFIX?.includes("termux");
+
+const puppeteerConfig = isTermux
+  ? {
+      executablePath: "/data/data/com.termux/files/usr/bin/chromium",
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+    }
+  : {};
+
 export const client = new Client({
     authStrategy: new LocalAuth({ clientId: CLIENT_ID }),
-    puppeteer: { headless: true }
+    puppeteer: {
+        headless: true,
+        ...puppeteerConfig
+    }
 });
+
+console.log("isTermux:", isTermux);
 
 client.on("qr", qr => {
     console.log("[BOT] Escaneie o QR Code");
