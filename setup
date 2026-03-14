@@ -153,7 +153,7 @@ if [[ "$PREFIX" == *"com.termux"* ]]; then
     if node -e "require('@img/sharp-wasm32')" >/dev/null 2>&1; then
         log_ok "sharp-wasm já instalado"
     else
-        npm install @img/sharp-wasm32
+        npm install --cpu=wasm32 @img/sharp-wasm32
     fi
 fi
 
