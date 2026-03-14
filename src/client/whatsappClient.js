@@ -9,7 +9,7 @@ export const { Client, LocalAuth, MessageMedia } = pkg;
 // detecta termux, e usa o executável do chromium do sistema em vez do puppeteer
 const isTermux =
   os.platform() === "linux" &&
-  process.env.PREFIX?.includes("termux");
+  process.env.PREFIX?.startsWith("/data/data/com.termux");
 
 const puppeteerConfig = isTermux
   ? {
@@ -26,7 +26,9 @@ export const client = new Client({
     }
 });
 
+// debug
 console.log("isTermux:", isTermux);
+console.log(process.env.PREFIX);
 
 client.on("qr", qr => {
     console.log("[BOT] Escaneie o QR Code");
