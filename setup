@@ -110,4 +110,87 @@ esac
 
 log_info "Sistema: $UNAME"
 log_info "Arquitetura: $ARCH"
-log_info "Plataforma: $PLATFORM"
+log_info "Plataforma: $PLATFORM"]
+
+# ------------------------
+# Informações do ambiente
+# ------------------------
+log_info "Verificando ambiente"
+
+log_debug "Node: $(node -v 2>/dev/null || echo 'não encontrado')"
+log_debug "npm:  $(npm -v 2>/dev/null || echo 'não encontrado')"
+log_debug "PREFIX: ${PREFIX:-<vazio>}"
+
+# ------------------------
+# Setup npm
+# ------------------------
+log_info "Instalando dependências npm"
+
+export PUPPETEER_SKIP_DOWNLOAD=1
+run_cmd npm ci
+
+# ------------------------
+# Termux
+# ------------------------
+if [[ "$PREFIX" == *"com.termux"* ]]; then
+    log_info "Ambiente Termux detectado"
+
+    if ! command -v chromium >/dev/null 2>&1; then
+        log_warn "Chromium não encontrado, instalando"
+        run_cmd pkg install -y chromium
+    else
+        log_ok "Chromium já instalado"
+    fi
+
+    if ! command -v vips >/dev/null 2>&1; then
+        log_warn "libvips não encontrada, instalando"
+        run_cmd pkg install libvips
+    else
+        log_ok "libvips já instalada"
+    fi
+
+    log_info "Reconstruindo módulo sharp"
+    run_cmd npm rebuild sharp
+fi
+
+# ------------------------
+# Diretórios
+# ------------------------
+log_info "Preparando diretórios"
+mkdir -p bin
+log_debug "Diretório bin garantido"
+
+# ------------------------
+# Arquivos por plataforma
+# ------------------------
+log_info "Selecionando dependências binárias"
+
+files=()
+if [[ "$PLATFORM" == "win" ]]; then
+    log_debug "Usando binários Windows"
+    files=(
+        "https://github.com/synt-xerror/manybot/releases/download/dependencies/yt-dlp.exe bin/yt-dlp.exe"
+        "https://github.com/synt-xerror/manybot/releases/download/dependencies/ffmpeg.exe bin/ffmpeg.exe"
+    )
+else
+    log_debug "Usando binários Unix"
+    files=(
+        "https://github.com/synt-xerror/manybot/releases/download/dependencies/yt-dlp bin/yt-dlp"
+        "https://github.com/synt-xerror/manybot/releases/download/dependencies/ffmpeg bin/ffmpeg"
+    )
+fi
+
+log_debug "Total de arquivos para baixar: ${#files[@]}"
+
+# ------------------------
+# Download
+# ------------------------
+for file in "${files[@]}"; do
+    url="${file%% *}"
+    dest="${file##* }"
+
+    log_info "Processando dependência"
+    download_file "$url" "$dest"
+done
+
+log_ok "Setup concluído com sucesso"
