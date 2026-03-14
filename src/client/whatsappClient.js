@@ -8,13 +8,19 @@ export const { Client, LocalAuth, MessageMedia } = pkg;
 
 // detecta termux, e usa o executável do chromium do sistema em vez do puppeteer
 const isTermux =
-  os.platform() === "linux" &&
+  (os.platform() === "linux" || os.platform() === "android") &&
   process.env.PREFIX?.startsWith("/data/data/com.termux");
 
 const puppeteerConfig = isTermux
   ? {
-      executablePath: "/data/data/com.termux/files/usr/bin/chromium",
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+        executablePath: "/data/data/com.termux/files/usr/bin/chromium",
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--disable-software-rasterizer"
+        ]
     }
   : {};
 
