@@ -144,7 +144,7 @@ if [[ "$PREFIX" == *"com.termux"* ]]; then
         clang
         make
         pkg-config
-        python
+        python3
         chromium
         libvips
         xorgproto
@@ -162,7 +162,11 @@ if [[ "$PREFIX" == *"com.termux"* ]]; then
 
     log_info "Reconstruindo módulo sharp"
     rm -rf node_modules/sharp
-    run_cmd npm rebuild sharp
+
+    export GYP_DEFINES="OS=linux"
+    export npm_config_build_from_source=true
+
+    run_cmd npm install sharp --build-from-source
 fi
 
 # ------------------------
