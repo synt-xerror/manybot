@@ -127,6 +127,7 @@ log_debug "PREFIX: ${PREFIX:-<vazio>}"
 log_info "Instalando dependências npm"
 
 export PUPPETEER_SKIP_DOWNLOAD=1
+run_cmd npm install
 run_cmd npm ci
 
 # ------------------------
