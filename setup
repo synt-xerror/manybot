@@ -150,10 +150,10 @@ if [[ "$PREFIX" == *"com.termux"* ]]; then
 
     log_info "Usando sharp via WebAssembly"
 
-    if node -e "require('@img/sharp-wasm')" >/dev/null 2>&1; then
+    if node -e "require('@img/sharp-wasm32')" >/dev/null 2>&1; then
         log_ok "sharp-wasm já instalado"
     else
-        run_cmd npm install @img/sharp-wasm
+        run_cmd npm install @img/sharp-wasm32
     fi
 fi
 
@@ -164,7 +164,6 @@ log_info "Instalando dependências npm"
 
 export PUPPETEER_SKIP_DOWNLOAD=1
 run_cmd npm install
-run_cmd npm ci
 
 # ------------------------
 # Diretórios
