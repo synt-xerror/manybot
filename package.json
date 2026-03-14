@@ -3,9 +3,10 @@
   "version": "2.0.0",
   "type": "module",
   "dependencies": {
+    "node-addon-api": "^7",
+    "node-gyp": "^12.2.0",
     "qrcode-terminal": "^0.12.0",
     "sharp": "^0.34.5",
-    "whatsapp-web.js": "^1.24.0",
-    "node-addon-api": "^7"
+    "whatsapp-web.js": "^1.24.0"
   }
 }
