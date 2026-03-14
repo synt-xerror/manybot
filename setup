@@ -137,7 +137,7 @@ install_deps() {
     local packages=("$@")
 
     for pkg in "${packages[@]}"; do
-        if ! command -v "$pkg" >/dev/null 2>&1; then
+        if ! dpkg -s "$pkg" >/dev/null 2>&1; then
             log_warn "$pkg não encontrado, instalando"
             run_cmd pkg install -y "$pkg"
         else
@@ -149,7 +149,6 @@ install_deps() {
 if [[ "$PREFIX" == *"com.termux"* ]]; then
     log_info "Ambiente Termux detectado"
 
-    # Lista de dependências
     deps=(
         clang
         make
@@ -160,15 +159,19 @@ if [[ "$PREFIX" == *"com.termux"* ]]; then
         xorgproto
         libx11
         libxrender
-        libxcd
+        libxcb
     )
 
     install_deps "${deps[@]}"
 
+    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH"
+    export npm_config_platform=linux
+
+    node -e "require('sharp')" >/dev/null 2>&1 && log_ok "sharp OK" && return
+
     log_info "Reconstruindo módulo sharp"
     rm -rf node_modules/sharp
     run_cmd npm rebuild sharp
-    node -e "require('sharp'); console.log('sharp OK')"
 fi
 
 # ------------------------
