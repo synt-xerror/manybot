@@ -18,7 +18,7 @@ download_file() {
     fi
 
     echo "Baixando $url → $dest"
-
+ 
     if command -v curl >/dev/null 2>&1; then
         curl -L "$url" -o "$dest"
     elif command -v wget >/dev/null 2>&1; then
@@ -43,7 +43,13 @@ esac
 echo "Plataforma detectada: $PLATFORM"
 
 # Setup npm
+export PUPPETEER_SKIP_DOWNLOAD=1
 run_cmd npm ci
+
+# Instala o chromium manualmente se estiver no termux
+if [[ "$PREFIX" == *"com.termux"* ]]; then
+    command -v chromium >/dev/null 2>&1 || pkg install -y chromium
+fi
 
 # Cria pasta bin
 mkdir -p bin
