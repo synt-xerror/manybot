@@ -1,97 +1,256 @@
-import pkg from "whatsapp-web.js";
-const { MessageMedia } = pkg;
-
 import fs from "fs";
+import path from "path";
 import os from "os";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import webpmux from "node-webpmux";
 
-import { botMsg } from "../utils/botMsg.js";
+import pkg from "whatsapp-web.js";
+import { createSticker } from "wa-sticker-formatter";
+
 import { client } from "../client/whatsappClient.js";
+import { botMsg } from "../utils/botMsg.js";
+import { emptyFolder } from "../utils/file.js";
+import { stickerSessions } from "./index.js";
 
-const exec = promisify(execFile);
+const { MessageMedia } = pkg;
+const execFileAsync = promisify(execFile);
 
-export async function gerarSticker(msg) {
+const DOWNLOADS_DIR = path.resolve("downloads");
+const FFMPEG = os.platform() === "win32"
+  ? ".\\bin\\ffmpeg.exe"
+  : "./bin/ffmpeg";
 
-    if (!msg.hasMedia) {
-        await msg.reply(botMsg("Envie uma imagem junto com o comando: `!figurinha`."));
-        return;
+const MAX_STICKER_SIZE = 900 * 1024;
+const SESSION_TIMEOUT = 2 * 60 * 1000;
+const MAX_MEDIA = 10;
+
+// ───────────────── Helpers ─────────────────
+
+function ensureDownloadsDir() {
+  if (!fs.existsSync(DOWNLOADS_DIR)) {
+    fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
+  }
+}
+
+function cleanupFiles(...files) {
+  for (const f of files) {
+    if (f && fs.existsSync(f)) fs.unlinkSync(f);
+  }
+}
+
+// Converte vídeo/gif → GIF 512x512 com paleta preservada
+async function convertVideoToGif(inputPath, outputPath, fps = 12) {
+
+  const clampedFps = Math.min(fps, 12);
+
+  const filter = [
+    `fps=${clampedFps},scale=512:512:flags=lanczos,split[s0][s1]`,
+    `[s0]palettegen=max_colors=256:reserve_transparent=1[p]`,
+    `[s1][p]paletteuse=dither=bayer`
+  ].join(";");
+
+  await execFileAsync(FFMPEG, [
+    "-i", inputPath,
+    "-filter_complex", filter,  // <-- era -vf, tem que ser -filter_complex pro split funcionar
+    "-loop", "0",
+    "-y",
+    outputPath
+  ]);
+}
+
+// Força imagem estática para 512x512
+async function resizeToSticker(inputPath, outputPath) {
+
+  await execFileAsync(FFMPEG, [
+    "-i", inputPath,
+    "-vf", "scale=512:512:flags=lanczos",  // lanczos = melhor qualidade no resize
+    "-y",
+    outputPath
+  ]);
+
+}
+
+async function createStickerWithFallback(stickerInputPath, isAnimated) {
+
+  const qualities = [80, 60, 40, 20];
+
+  for (const quality of qualities) {
+
+    const buffer = await createSticker(
+      fs.readFileSync(stickerInputPath),
+      {
+        pack: "Criada por ManyBot\n",
+        author: "\ngithub.com/synt-xerror/manybot",
+        type: isAnimated ? "FULL" : "STATIC",
+        categories: ["🤖"],
+        quality,
+      }
+    );
+
+    if (buffer.length <= MAX_STICKER_SIZE) {
+      return buffer;
     }
 
-    const media = await msg.downloadMedia();
-    const ext = media.mimetype.split("/")[1];
+  }
 
-    const input = `downloads/${msg.id._serialized}.${ext}`;
-    const output = `downloads/${msg.id._serialized}.webp`;
+  throw new Error("Não foi possível reduzir o sticker para menos de 900 KB.");
+}
 
-    fs.writeFileSync(input, Buffer.from(media.data, "base64"));
+// ───────────────── Sessão ─────────────────
 
-    const so = os.platform();
-    const cmd = so === "win32" ? ".\\bin\\ffmpeg.exe" : "./bin/ffmpeg";
+export function iniciarSessao(chatId, author) {
 
-    await exec(cmd, [
-        "-y",
-        "-i", input,
-        "-vf",
-        "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000",
-        "-vcodec", "libwebp",
-        "-lossless", "1",
-        "-qscale", "75",
-        "-preset", "default",
-        "-an",
-        "-vsync", "0",
-        output
-    ]);
+  if (stickerSessions.has(chatId)) return false;
 
-    const img = new webpmux.Image();
-    await img.load(output);
+  const timeout = setTimeout(() => {
 
-    const metadata = {
-        "sticker-pack-id": "manybot",
-        "sticker-pack-name": "Feito por ManyBot",
-        "sticker-pack-publisher": "My Little Pony Lovers",
-        "emojis": ["🤖"]
-    };
+    stickerSessions.delete(chatId);
+    client.sendMessage(chatId, botMsg("Sessão de figurinha expirou."));
 
-    const json = Buffer.from(JSON.stringify(metadata));
+  }, SESSION_TIMEOUT);
 
-    const exif = Buffer.concat([
-        Buffer.from([
-            0x49,0x49,0x2A,0x00,
-            0x08,0x00,0x00,0x00,
-            0x01,0x00,
-            0x41,0x57,
-            0x07,0x00
-        ]),
-        Buffer.from([
-            json.length & 0xff,
-            (json.length >> 8) & 0xff,
-            (json.length >> 16) & 0xff,
-            (json.length >> 24) & 0xff
-        ]),
-        json
-    ]);
+  stickerSessions.set(chatId, {
+    author,
+    medias: [],
+    timeout
+  });
 
-    img.exif = exif;
-    await img.save(output);
+  return true;
 
-    const data = fs.readFileSync(output);
+}
 
-    const sticker = new MessageMedia(
-        "image/webp",
-        data.toString("base64"),
-        "sticker.webp"
-    );
+// ───────────────── Coleta de mídia ─────────────────
 
-    const chat = await msg.getChat();
+export async function coletarMidia(msg) {
 
-    await client.sendMessage(
-        chat.id._serialized,
-        sticker,
-        { sendMediaAsSticker: true }
-    );
+  const chat = await msg.getChat();
+  const chatId = chat.id._serialized;
 
-    fs.unlinkSync(input);
-    fs.unlinkSync(output);
+  const session = stickerSessions.get(chatId);
+  if (!session) return;
+
+  const sender = msg.author || msg.from;
+  if (sender !== session.author) return;
+  if (!msg.hasMedia) return;
+
+  const media = await msg.downloadMedia();
+  if (!media) return;
+
+  const isGif =
+    media.mimetype === "image/gif" ||
+    (media.mimetype === "video/mp4" && msg._data?.isGif);
+
+  if (
+    !media.mimetype ||
+    (!media.mimetype.startsWith("image/") &&
+     !media.mimetype.startsWith("video/") &&
+     !isGif)
+  ) {
+    return;
+  }
+
+  if (session.medias.length < MAX_MEDIA) {
+    session.medias.push(media);
+  }
+
+}
+
+// ───────────────── Criar stickers ─────────────────
+
+export async function gerarSticker(msg, chatId) {
+
+  const sender = msg.author || msg.from;
+  const session = stickerSessions.get(chatId);
+
+  if (!session) {
+    return msg.reply(botMsg("Nenhuma sessão de figurinha ativa."));
+  }
+
+  if (session.author !== sender) {
+    return msg.reply(botMsg("Apenas quem iniciou a sessão pode criar as figurinhas."));
+  }
+
+  const medias = session.medias;
+
+  if (!medias.length) {
+    return msg.reply(botMsg("Nenhuma imagem recebida."));
+  }
+
+  clearTimeout(session.timeout);
+
+  console.log("midias:", medias.length);
+
+  await msg.reply(botMsg("Aguarde! Estou criando as suas figurinhas..."));
+
+  ensureDownloadsDir();
+
+    for (const media of medias) {
+    try {
+      const ext = media.mimetype.split("/")[1];
+      const isVideo = media.mimetype.startsWith("video/");
+      const isGif = media.mimetype === "image/gif";
+      const isAnimated = isVideo || isGif;
+
+      const id = Date.now() + "-" + Math.random().toString(36).slice(2);
+      const inputPath = path.join(DOWNLOADS_DIR, `${id}.${ext}`);
+      const gifPath = path.join(DOWNLOADS_DIR, `${id}.gif`);
+      const resizedPath = path.join(DOWNLOADS_DIR, `${id}-scaled.${ext}`);
+
+      fs.writeFileSync(inputPath, Buffer.from(media.data, "base64"));
+
+      // LOG 1 — arquivo de entrada
+      const inputSize = fs.statSync(inputPath).size;
+      console.log(`[1] mimetype: ${media.mimetype} | isAnimated: ${isAnimated} | inputPath: ${inputPath} | size: ${inputSize} bytes`);
+
+      let stickerInputPath = inputPath;
+
+      if (isAnimated) {
+        console.log("[2] Convertendo para GIF...");
+        await convertVideoToGif(inputPath, gifPath, isVideo ? 12 : 24);
+
+        // LOG 2 — gif gerado
+        if (fs.existsSync(gifPath)) {
+          console.log(`[2] GIF gerado: ${fs.statSync(gifPath).size} bytes`);
+        } else {
+          console.error("[2] ERRO: gifPath não foi criado pelo ffmpeg!");
+        }
+
+        stickerInputPath = gifPath;
+      } else {
+        console.log("[2] Redimensionando imagem estática...");
+        await resizeToSticker(inputPath, resizedPath);
+
+        if (fs.existsSync(resizedPath)) {
+          console.log(`[2] Resized gerado: ${fs.statSync(resizedPath).size} bytes`);
+        } else {
+          console.error("[2] ERRO: resizedPath não foi criado!");
+        }
+
+        stickerInputPath = resizedPath;
+      }
+
+      // LOG 3 — antes de criar o sticker
+      console.log(`[3] stickerInputPath: ${stickerInputPath} | exists: ${fs.existsSync(stickerInputPath)} | size: ${fs.existsSync(stickerInputPath) ? fs.statSync(stickerInputPath).size : "N/A"} bytes`);
+
+      const stickerBuffer = await createStickerWithFallback(stickerInputPath, isAnimated);
+
+      // LOG 4 — sticker gerado
+      console.log(`[4] Sticker buffer: ${stickerBuffer.length} bytes`);
+
+      const stickerMedia = new MessageMedia("image/webp", stickerBuffer.toString("base64"));
+      await client.sendMessage(chatId, stickerMedia, { sendMediaAsSticker: true });
+
+      cleanupFiles(inputPath, gifPath, resizedPath);
+
+    } catch (err) {
+      console.error("Erro ao gerar sticker:", err);
+      await msg.reply(botMsg("Erro ao gerar uma das figurinhas."));
+    }
+  }
+
+  await msg.reply(botMsg("Figurinhas geradas com sucesso!"));
+
+  stickerSessions.delete(chatId);
+  emptyFolder("downloads");
+
 }
