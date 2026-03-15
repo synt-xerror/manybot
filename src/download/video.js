@@ -23,6 +23,7 @@ export async function get_video(url, id) {
         '--fragment-retries', '5',
         '--socket-timeout', '15',
         '--sleep-interval', '1', '--max-sleep-interval', '4',
+        '--no-playlist',
         url
     ];
 
