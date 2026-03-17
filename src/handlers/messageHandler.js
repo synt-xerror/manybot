@@ -16,7 +16,11 @@ export async function handleMessage(msg) {
   const chat   = await msg.getChat();
   const chatId = getChatId(chat);
 
-  if (!CHATS.includes(chatId)) return;
+  // se CHATS estiver vazio, ele pega todos os chats.
+  // se nao, ele pega os que estão na lista.
+  if (CHATS.length > 0) {
+    if (!CHATS.includes(chatId)) return;
+  }
 
   const ctx = await buildMessageContext(msg, chat, BOT_PREFIX);
   logger.msg(ctx);

@@ -17,7 +17,15 @@ if (!arg) {
 
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: CLIENT_ID }),
-  puppeteer: { headless: true },
+  puppeteer: {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      ...(resolvePuppeteerConfig().args || [])
+    ],
+    ...resolvePuppeteerConfig()
+  },
 });
 
 client.on("qr", (qr) => {
