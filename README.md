@@ -11,6 +11,7 @@ Algumas funcionalidades desse bot incluem:
 # Screenshots
 
 
+
 ---
 
 # Requisitos

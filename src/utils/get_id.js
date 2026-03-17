@@ -5,6 +5,7 @@
 import pkg      from "whatsapp-web.js";
 import qrcode   from "qrcode-terminal";
 import { CLIENT_ID } from "../config.js";
+import { resolvePuppeteerConfig } from "../client/environment.js";
 
 const { Client, LocalAuth } = pkg;
 
